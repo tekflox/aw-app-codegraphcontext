@@ -1,0 +1,25 @@
+{
+  "layout": "stack",
+  "regions": [
+    {
+      "id": "status",
+      "widgets": [
+        { "type": "markdown", "value": "## Code Graph" },
+        {
+          "type": "button",
+          "label": "Force reindex",
+          "action": { "call": "POST /api/apps/codegraphcontext/reindex" }
+        }
+      ]
+    },
+    {
+      "id": "main",
+      "widgets": [
+        {
+          "type": "iframe",
+          "src": "/api/apps/codegraphcontext/graph"
+        }
+      ]
+    }
+  ]
+}

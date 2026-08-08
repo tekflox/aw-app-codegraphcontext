@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "codegraphcontext": {
+      "enabled": true,
+      "type": "stdio",
+      "command": "/tmp/pytest-of-1001/pytest-2/test_activate_registers_visual0/home/bin/cgc",
+      "args": [
+        "mcp",
+        "start"
+      ]
+    }
+  }
+}
