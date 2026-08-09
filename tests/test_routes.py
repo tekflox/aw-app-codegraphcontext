@@ -41,6 +41,10 @@ def fake_bin_dir(tmp_path, monkeypatch):
     shim.write_text("#!/usr/bin/env bash\necho '{\"ok\": true}'\n")
     shim.chmod(0o755)
     monkeypatch.setenv("AW_WORKSPACE_HOME", str(home))
+    # cgc_shim_path() returns a bare "cgc", resolved via PATH — same as the
+    # real deployment (install_cgc.sh's shim dir is on the host process's
+    # PATH), so the fake shim's dir must be on PATH here too.
+    monkeypatch.setenv("PATH", f"{home / 'bin'}{os.pathsep}{os.environ.get('PATH', '')}")
     return str(home)
 
 

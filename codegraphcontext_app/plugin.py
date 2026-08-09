@@ -28,8 +28,6 @@ import os
 import shutil
 from pathlib import Path
 
-from src.apps import paths
-
 from . import routes as routes_mod
 
 log = logging.getLogger("aw_apps.codegraphcontext")
@@ -39,10 +37,20 @@ WATCHDOG_ID = "reconciler"
 
 
 def cgc_shim_path() -> str:
-    """Absolute path to the `cgc` wrapper install_cgc.sh drops on the
-    persistent bin dir — used directly (not relying on the runtime's PATH)
-    by every subprocess this plugin spawns, and by the mcp.json entry."""
-    return os.path.join(paths.bin_dir(), "cgc")
+    """The `cgc` command install_cgc.sh drops on the persistent bin dir.
+
+    Deliberately a bare name, resolved via PATH at spawn time by every
+    subprocess this plugin starts (and by whatever spawns the mcp.json
+    entry) — NOT an absolute path computed by importing the host runtime's
+    own ``src.apps.paths`` module. A Tier-1 app must only touch the host
+    through the ``ctx`` facades (see codegraphcontext_app/plugin.py's own
+    activate()); importing ``src.apps`` directly would also break this
+    app's own standalone test/CI checkout, which has no ``src/`` tree.
+    install_cgc.sh already guarantees `$AW_WORKSPACE_HOME/bin` (where the
+    shim lives) is on PATH for the whole host process and everything it
+    spawns — see paths.py's own docstring on the persistent bin dir.
+    """
+    return "cgc"
 
 
 def build_mcp_doc() -> dict:
