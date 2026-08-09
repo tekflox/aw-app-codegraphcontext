@@ -2,7 +2,7 @@
   "manifest_version": 1,
   "id": "codegraphcontext",
   "name": "CodeGraphContext",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Indexes every repo under the workspace into a local code graph (functions, classes, imports, call chains) and exposes it to any agent as MCP tools, plus a graph visualizer UI. Installs its own isolated `cgc` CLI, keeps the graph fresh via a low-priority periodic reconciler (never a real-time file watcher), and runs the visualizer as a managed background service.",
   "tier": "inprocess",
   "category": "dev-tools",
@@ -104,12 +104,12 @@
       "initial_index_parallel_workers": {
         "type": "number",
         "default": 4,
-        "description": "Worker count for the one-time initial full index (can be higher/more aggressive — it only runs once per fresh install)."
+        "description": "Worker count for the one-time initial full index (can be higher/more aggressive \u2014 it only runs once per fresh install)."
       },
       "reconcile_parallel_workers": {
         "type": "number",
         "default": 1,
-        "description": "Worker count for the recurring low-priority reconciler tick (kept low on purpose — CPU-gentle, not real-time)."
+        "description": "Worker count for the recurring low-priority reconciler tick (kept low on purpose \u2014 CPU-gentle, not real-time)."
       }
     },
     "required": []
