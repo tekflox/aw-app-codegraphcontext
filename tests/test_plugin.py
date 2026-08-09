@@ -100,13 +100,15 @@ def test_activate_registers_visualizer_service_and_reconciler_watchdog(
             assert "reconciler" in rt.watchdog.task_ids_for("codegraphcontext")
             p("watchdog assertion ok")
 
-            # --- mcp.json actually written, pointing at the installed shim ---
+            # --- mcp.json actually written, pointing at the gateway-side venv path ---
             mcp_doc = json.loads(open(os.path.join(REPO_ROOT, "mcp.json")).read())
             server = mcp_doc["mcpServers"]["codegraphcontext"]
             assert server["args"] == ["mcp", "start"]
-            # command is a bare "cgc", resolved via PATH (see cgc_shim_path's
-            # docstring) — not an absolute path, so PATH lookup, not isfile.
-            assert server["command"] == "cgc"
+            # command is the gateway-container-relative venv path (see
+            # mcp_command_path's docstring) — not host-resolvable by
+            # design, so no isfile/which check here; the real cgc shim on
+            # THIS (host) PATH is asserted separately below.
+            assert server["command"] == "/workspace/apps/codegraphcontext/.data/venv/bin/cgc"
             assert shutil.which("cgc") is not None
             p("mcp.json assertions ok")
 

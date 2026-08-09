@@ -53,6 +53,27 @@ def cgc_shim_path() -> str:
     return "cgc"
 
 
+def mcp_command_path() -> str:
+    """Absolute path to the venv's own `cgc`, as seen from INSIDE the
+    mcp-gateway's container — not this (Tier-1, host-process) container.
+
+    The gateway (tier: container) spawns stdio MCP servers itself, in its
+    own container — a bare "cgc" (PATH-resolved on the HOST) is invisible
+    to it, and a host-absolute path (this app's ctx.package_dir) is also
+    wrong, because the gateway mounts $AW_APPS_ROOT at a DIFFERENT mount
+    point: /workspace/apps (see aw-mcp-gateway/aw-app.json's
+    AW_APP_SCAN_ROOTS + volumes). That mount is read-only and covers this
+    app's whole package dir, including .data/venv — so the venv's own
+    `cgc` (a real, --copies-installed binary per install_cgc.sh, not a
+    symlink out to some host-only interpreter path) is reachable there at
+    a fixed, predictable path. This hardcodes that gateway-side mount
+    convention; it's real coupling to another app's contract, not
+    something ctx exposes today, but it's the only thing that actually
+    works for a stdio MCP entry from a Tier-1 app with its own venv.
+    """
+    return "/workspace/apps/codegraphcontext/.data/venv/bin/cgc"
+
+
 def build_mcp_doc() -> dict:
     """This app's own root mcp.json content — static (no user-editable
     server list, unlike aw-app-mcp-tools), so reload_on_save is false and
@@ -63,7 +84,7 @@ def build_mcp_doc() -> dict:
             "codegraphcontext": {
                 "enabled": True,
                 "type": "stdio",
-                "command": cgc_shim_path(),
+                "command": mcp_command_path(),
                 "args": ["mcp", "start"],
             }
         }

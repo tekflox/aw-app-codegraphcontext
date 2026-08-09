@@ -20,7 +20,15 @@ mkdir -p "${DATA_DIR}" "${CGC_HOME}" "${AW_BIN_DIR}"
 
 if [ ! -x "${VENV_DIR}/bin/python" ]; then
   echo "install_cgc.sh: creating isolated venv at ${VENV_DIR}"
-  python3 -m venv "${VENV_DIR}"
+  # --copies, not the default symlinks: this venv lives under the app's
+  # package dir, which multiple containers can see at DIFFERENT mount
+  # points (the host process directly, the mcp-gateway's own container via
+  # its $AW_APPS_ROOT -> /workspace/apps mount, ...). A symlinked python
+  # bakes in the ABSOLUTE path of whatever `python3` resolved to at
+  # creation time (e.g. /usr/local/bin/python3.12) — a path that may not
+  # exist, or may differ, in every container that later tries to run it.
+  # A real copy is self-contained and portable across all of them.
+  python3 -m venv --copies "${VENV_DIR}"
 fi
 
 "${VENV_DIR}/bin/pip" install --upgrade pip -q
