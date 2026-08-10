@@ -53,28 +53,23 @@ def cgc_shim_path() -> str:
     return "cgc"
 
 
-def mcp_command_path() -> str:
+def mcp_command_path(package_dir: str) -> str:
     """Absolute path to the venv's own `cgc`, as seen from INSIDE the
     mcp-gateway's container — not this (Tier-1, host-process) container.
 
     The gateway (tier: container) spawns stdio MCP servers itself, in its
     own container — a bare "cgc" (PATH-resolved on the HOST) is invisible
-    to it, and a host-absolute path (this app's ctx.package_dir) is also
-    wrong, because the gateway mounts $AW_APPS_ROOT at a DIFFERENT mount
-    point: /workspace/apps (see aw-mcp-gateway/aw-app.json's
-    AW_APP_SCAN_ROOTS + volumes). That mount is read-only and covers this
-    app's whole package dir, including .data/venv — so the venv's own
-    `cgc` (a real, --copies-installed binary per install_cgc.sh, not a
-    symlink out to some host-only interpreter path) is reachable there at
-    a fixed, predictable path. This hardcodes that gateway-side mount
-    convention; it's real coupling to another app's contract, not
-    something ctx exposes today, but it's the only thing that actually
-    works for a stdio MCP entry from a Tier-1 app with its own venv.
+    to it. aw-mcp-gateway now mounts $AW_APPS_ROOT at the SAME path it has
+    on the host (/opt/aw-workspace/apps/<id>, no more gateway-specific
+    /workspace/apps translation — see tekflox/aw-mcp-gateway's
+    aw-app.json), so `package_dir` (== `ctx.package_dir`) is valid from
+    both sides and this is now just a plain path join, no hardcoded
+    gateway-side convention to maintain separately.
     """
-    return "/workspace/apps/codegraphcontext/.data/venv/bin/cgc"
+    return os.path.join(package_dir, ".data", "venv", "bin", "cgc")
 
 
-def build_mcp_doc() -> dict:
+def build_mcp_doc(package_dir: str) -> dict:
     """This app's own root mcp.json content — static (no user-editable
     server list, unlike aw-app-mcp-tools), so reload_on_save is false and
     there's no on_config_saved hook; activate() re-writes it every boot
@@ -84,7 +79,7 @@ def build_mcp_doc() -> dict:
             "codegraphcontext": {
                 "enabled": True,
                 "type": "stdio",
-                "command": mcp_command_path(),
+                "command": mcp_command_path(package_dir),
                 "args": ["mcp", "start"],
             }
         }
@@ -92,7 +87,7 @@ def build_mcp_doc() -> dict:
 
 
 def write_mcp_json(package_dir: str) -> dict:
-    doc = build_mcp_doc()
+    doc = build_mcp_doc(package_dir)
     Path(package_dir, "mcp.json").write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
     return doc
 

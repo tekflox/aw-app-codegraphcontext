@@ -100,15 +100,16 @@ def test_activate_registers_visualizer_service_and_reconciler_watchdog(
             assert "reconciler" in rt.watchdog.task_ids_for("codegraphcontext")
             p("watchdog assertion ok")
 
-            # --- mcp.json actually written, pointing at the gateway-side venv path ---
+            # --- mcp.json actually written, pointing at the venv's own cgc ---
             mcp_doc = json.loads(open(os.path.join(REPO_ROOT, "mcp.json")).read())
             server = mcp_doc["mcpServers"]["codegraphcontext"]
             assert server["args"] == ["mcp", "start"]
-            # command is the gateway-container-relative venv path (see
-            # mcp_command_path's docstring) — not host-resolvable by
-            # design, so no isfile/which check here; the real cgc shim on
-            # THIS (host) PATH is asserted separately below.
-            assert server["command"] == "/workspace/apps/codegraphcontext/.data/venv/bin/cgc"
+            # command is package_dir-relative — valid on the host AND from
+            # inside the gateway container, which now mounts $AW_APPS_ROOT
+            # at this same path (see mcp_command_path's docstring).
+            assert server["command"] == os.path.join(
+                REPO_ROOT, ".data", "venv", "bin", "cgc")
+            assert os.path.isfile(server["command"])
             assert shutil.which("cgc") is not None
             p("mcp.json assertions ok")
 

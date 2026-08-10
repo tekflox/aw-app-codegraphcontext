@@ -3,7 +3,7 @@
     "codegraphcontext": {
       "enabled": true,
       "type": "stdio",
-      "command": "/workspace/apps/codegraphcontext/.data/venv/bin/cgc",
+      "command": "/opt/aw-workspace/repos/aw-app-codegraphcontext/.data/venv/bin/cgc",
       "args": [
         "mcp",
         "start"
