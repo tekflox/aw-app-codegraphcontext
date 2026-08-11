@@ -18,14 +18,29 @@ The one-time initial index is intentionally NOT the reconciler's first tick
 — it's a separate fire-and-forget task so it can run with a higher worker
 count (aggressive is fine, it only happens once) while every recurring tick
 after it stays gentle.
+
+Write/read concurrency with the visualizer: CodeGraphContext's default
+storage (KuzuDB) is a single-writer embedded file store — the visualizer
+holds it open continuously, so any OTHER `cgc` invocation (index/update/
+list) started while it's running fails with a lock error. Found live
+(2026-08-10): switching DEFAULT_DATABASE to FalkorDB does NOT reliably fix
+this either — `cgc update` still hit the kuzudb lock path even with
+FalkorDB configured, an apparent inconsistency in the upstream tool across
+commands, not something safe to depend on. Instead: `_with_visualizer_paused`
+stops the service before any index/update, and only restarts it if it was
+actually running before (respecting `auto_start: false`) — a few seconds
+of visualizer downtime per initial-index/reconcile tick, but correct
+regardless of backend quirks.
 """
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
 import shutil
+import time
 from pathlib import Path
 
 from . import routes as routes_mod
@@ -96,6 +111,10 @@ class CodeGraphContextAppPlugin:
     async def activate(self, ctx) -> None:
         self.ctx = ctx
         self._initial_index_task: asyncio.Task | None = None
+        # Read by routes.py's /status instead of shelling out `cgc list`
+        # (which would itself compete with the visualizer for the DB lock).
+        self.last_index: dict = {"ok": None, "at": None, "detail": ""}
+        self.last_reconcile: dict = {"ok": None, "at": None, "detail": ""}
 
         ctx.commands.install_system_cli(
             "cgc", "scripts/install_cgc.sh", uninstall="scripts/uninstall_cgc.sh"
@@ -103,7 +122,7 @@ class CodeGraphContextAppPlugin:
 
         mcp_doc = write_mcp_json(ctx.package_dir)
 
-        ctx.routes.register(routes_mod.build_routes(ctx))
+        ctx.routes.register(routes_mod.build_routes(ctx, self))
 
         port = int(ctx.config.get("visualizer_port") or 8010)
         index_root = str(ctx.config.get("index_root") or "/opt/aw-workspace")
@@ -124,6 +143,29 @@ class CodeGraphContextAppPlugin:
             port, index_root, list(mcp_doc["mcpServers"]),
         )
 
+    @contextlib.asynccontextmanager
+    async def _visualizer_paused(self):
+        """CodeGraphContext's default storage (KuzuDB) is a single-writer
+        embedded file store — the visualizer holds it open continuously,
+        so any OTHER `cgc` invocation (index/update/list) started while
+        it's running fails with a lock error (confirmed live; switching
+        DEFAULT_DATABASE didn't reliably fix it either — see module
+        docstring). Stop it for the duration of a write, restart after —
+        only if it was actually running before, so `auto_start: false`
+        stays honored."""
+        was_running = False
+        try:
+            was_running = bool(self.ctx.services.status(SERVICE_ID).get("running"))
+        except Exception:
+            log.exception("codegraphcontext: could not read visualizer status before pausing")
+        if was_running:
+            self.ctx.services.stop(SERVICE_ID)
+        try:
+            yield
+        finally:
+            if was_running:
+                self.ctx.services.start(SERVICE_ID)
+
     async def _run_initial_index(self, index_root: str) -> None:
         """One-shot, fire-and-forget. Only actually indexes if index_root
         isn't already indexed — `cgc index` is safe/cheap to call on an
@@ -132,20 +174,23 @@ class CodeGraphContextAppPlugin:
         workers = int(self.ctx.config.get("initial_index_parallel_workers", 4))
         env = {**os.environ, "PARALLEL_WORKERS": str(workers)}
         try:
-            proc = await asyncio.create_subprocess_exec(
-                cgc_shim_path(), "index", index_root, "--no-progress", "--summarize",
-                env=env, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
-            )
-            out, _ = await proc.communicate()
+            async with self._visualizer_paused():
+                proc = await asyncio.create_subprocess_exec(
+                    cgc_shim_path(), "index", index_root, "--no-progress", "--summarize",
+                    env=env, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+                )
+                out, _ = await proc.communicate()
+            detail = out.decode(errors="replace")[-2000:]
+            self.last_index = {"ok": proc.returncode == 0, "at": time.time(), "detail": detail}
             if proc.returncode != 0:
-                log.warning("codegraphcontext: initial index exited %s: %s",
-                            proc.returncode, out.decode(errors="replace")[-2000:])
+                log.warning("codegraphcontext: initial index exited %s: %s", proc.returncode, detail)
             else:
                 log.info("codegraphcontext: initial index of %s complete", index_root)
         except asyncio.CancelledError:
             raise
         except Exception:
             log.exception("codegraphcontext: initial index failed")
+            self.last_index = {"ok": False, "at": time.time(), "detail": "see app logs"}
 
     async def _reconcile_tick(self) -> None:
         """The watchdog cadence body — deliberately `cgc update` (a light,
@@ -157,12 +202,15 @@ class CodeGraphContextAppPlugin:
         argv = [cgc_shim_path(), "update", index_root, "--quiet"]
         if shutil.which("nice"):
             argv = ["nice", "-n", "19"] + argv
-        proc = await asyncio.create_subprocess_exec(
-            *argv, env=env, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
-        )
-        out, _ = await proc.communicate()
+        async with self._visualizer_paused():
+            proc = await asyncio.create_subprocess_exec(
+                *argv, env=env, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+            )
+            out, _ = await proc.communicate()
+        detail = out.decode(errors="replace")[-2000:]
+        self.last_reconcile = {"ok": proc.returncode == 0, "at": time.time(), "detail": detail}
         if proc.returncode != 0:
-            raise RuntimeError(f"cgc update exited {proc.returncode}: {out.decode(errors='replace')[-2000:]}")
+            raise RuntimeError(f"cgc update exited {proc.returncode}: {detail}")
 
     async def deactivate(self) -> None:
         if self._initial_index_task is not None and not self._initial_index_task.done():
