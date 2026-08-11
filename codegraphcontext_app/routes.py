@@ -15,7 +15,6 @@ Three surfaces:
 from __future__ import annotations
 
 import asyncio
-import os
 import time
 
 import httpx
@@ -43,8 +42,8 @@ def build_routes(ctx, plugin: "plugin_mod.CodeGraphContextAppPlugin") -> FastAPI
 
     async def _run_reindex() -> None:
         index_root = str(ctx.config.get("index_root") or "/opt/aw-workspace")
-        workers = int(ctx.config.get("initial_index_parallel_workers", 4))
-        env = {**os.environ, "PARALLEL_WORKERS": str(workers)}
+        workers = int(ctx.config.get("initial_index_parallel_workers", 2))
+        env = plugin._cgc_env(workers)
         async with plugin._visualizer_paused():
             proc = await asyncio.create_subprocess_exec(
                 plugin_mod.cgc_shim_path(), "index", index_root, "--force", "--no-progress",

@@ -9,7 +9,7 @@
   "publisher": "TekFlox",
   "resource_estimate": {
     "cpu": "low",
-    "memory": "~150 MB",
+    "memory": "~150 MB idle; can spike into the GBs during the one-time initial index of a large workspace",
     "disk": "~500 MB"
   },
   "runtime": {
@@ -103,13 +103,18 @@
       },
       "initial_index_parallel_workers": {
         "type": "number",
-        "default": 4,
-        "description": "Worker count for the one-time initial full index (can be higher/more aggressive \u2014 it only runs once per fresh install)."
+        "default": 2,
+        "description": "Worker count for the one-time initial full index. Lowered from an earlier default of 4 after a live OOM kill indexing a large multi-repo workspace \u2014 raise it only if you know the workspace being indexed is small."
       },
       "reconcile_parallel_workers": {
         "type": "number",
         "default": 1,
         "description": "Worker count for the recurring low-priority reconciler tick (kept low on purpose \u2014 CPU-gentle, not real-time)."
+      },
+      "index_source": {
+        "type": "boolean",
+        "default": false,
+        "description": "Store full source code text in the graph database. Off by default \u2014 found live: indexing a large multi-repo workspace with this on ran the container out of memory (an OOM kill, not an app error). Not needed for the MCP tools this app exposes (find_code, analyze_code_relationships, ...), which work off the graph structure, not stored source text."
       }
     },
     "required": []

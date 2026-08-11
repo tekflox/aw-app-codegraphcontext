@@ -181,13 +181,33 @@ class CodeGraphContextAppPlugin:
                 if was_running:
                     self.ctx.services.start(SERVICE_ID)
 
+    def _cgc_env(self, workers: int) -> dict:
+        """Common env for any `cgc index`/`update` subprocess.
+
+        INDEX_SOURCE=false (default here — CodeGraphContext's own default
+        is true): found live, indexing all of /opt/aw-workspace (dozens of
+        repos, ~720MB of source) with full source text duplicated into
+        every function/class node ran this container out of memory —
+        `last_index` came back `ok:false` with output cut off mid-run, no
+        traceback (the signature of an OOM kill, not an app error); `free
+        -h` at the time showed ~1GB free of 62GB. Storing source text
+        isn't needed for the MCP tools this app exposes (find_code,
+        analyze_code_relationships, etc. work off the graph structure);
+        only skip this default if you specifically need `cgc`'s source-text
+        features and know the workspace is small enough to afford it."""
+        return {
+            **os.environ,
+            "PARALLEL_WORKERS": str(workers),
+            "INDEX_SOURCE": str(bool(self.ctx.config.get("index_source", False))).lower(),
+        }
+
     async def _run_initial_index(self, index_root: str) -> None:
         """One-shot, fire-and-forget. Only actually indexes if index_root
         isn't already indexed — `cgc index` is safe/cheap to call on an
         already-indexed repo (it's the recurring reconciler that should
         stay off `index` and use the lighter `update`)."""
-        workers = int(self.ctx.config.get("initial_index_parallel_workers", 4))
-        env = {**os.environ, "PARALLEL_WORKERS": str(workers)}
+        workers = int(self.ctx.config.get("initial_index_parallel_workers", 2))
+        env = self._cgc_env(workers)
         try:
             async with self._visualizer_paused():
                 proc = await asyncio.create_subprocess_exec(
@@ -196,6 +216,8 @@ class CodeGraphContextAppPlugin:
                 )
                 out, _ = await proc.communicate()
             detail = out.decode(errors="replace")[-2000:]
+            if proc.returncode is not None and proc.returncode < 0:
+                detail += f"\n[process terminated by signal {-proc.returncode} — likely OOM-killed]"
             self.last_index = {"ok": proc.returncode == 0, "at": time.time(), "detail": detail}
             if proc.returncode != 0:
                 log.warning("codegraphcontext: initial index exited %s: %s", proc.returncode, detail)
@@ -213,7 +235,7 @@ class CodeGraphContextAppPlugin:
         file watcher) or a repeated full `cgc index`."""
         index_root = str(self.ctx.config.get("index_root") or "/opt/aw-workspace")
         workers = int(self.ctx.config.get("reconcile_parallel_workers", 1))
-        env = {**os.environ, "PARALLEL_WORKERS": str(workers)}
+        env = self._cgc_env(workers)
         argv = [cgc_shim_path(), "update", index_root, "--quiet"]
         if shutil.which("nice"):
             argv = ["nice", "-n", "19"] + argv
