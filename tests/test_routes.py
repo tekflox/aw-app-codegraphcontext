@@ -60,11 +60,14 @@ def fake_bin_dir(tmp_path, monkeypatch):
 
 
 def _app(fake_bin_dir, **config):
+    import asyncio
+
     ctx = _FakeCtx({"index_root": "/tmp/does-not-matter", **config})
     plugin = CodeGraphContextAppPlugin()
     plugin.ctx = ctx
     plugin.last_index = {"ok": None, "at": None, "detail": ""}
     plugin.last_reconcile = {"ok": None, "at": None, "detail": ""}
+    plugin._cgc_write_lock = asyncio.Lock()
     return build_routes(ctx, plugin), plugin
 
 
@@ -119,3 +122,32 @@ def test_graph_proxy_returns_503_when_visualizer_not_running(fake_bin_dir):
     client = TestClient(app)
     resp = client.get("/graph")
     assert resp.status_code == 503
+
+
+def test_visualizer_paused_serializes_concurrent_cgc_writes(fake_bin_dir):
+    """Found live 2026-08-10: a reconcile tick firing while the initial
+    index was still running (a large workspace can take well over
+    reconcile_interval_s) raced a second `cgc` write process against the
+    first — a DIFFERENT conflict than the visualizer-pause one, since
+    neither write is the visualizer. `_visualizer_paused()`'s
+    `_cgc_write_lock` must serialize every caller against every other,
+    not just against the visualizer."""
+    import asyncio
+
+    _, plugin = _app(fake_bin_dir)
+    concurrent = 0
+    max_concurrent = 0
+
+    async def fake_write():
+        nonlocal concurrent, max_concurrent
+        async with plugin._visualizer_paused():
+            concurrent += 1
+            max_concurrent = max(max_concurrent, concurrent)
+            await asyncio.sleep(0.05)
+            concurrent -= 1
+
+    async def run():
+        await asyncio.gather(fake_write(), fake_write(), fake_write())
+
+    asyncio.run(run())
+    assert max_concurrent == 1

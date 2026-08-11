@@ -115,6 +115,15 @@ class CodeGraphContextAppPlugin:
         # (which would itself compete with the visualizer for the DB lock).
         self.last_index: dict = {"ok": None, "at": None, "detail": ""}
         self.last_reconcile: dict = {"ok": None, "at": None, "detail": ""}
+        # Serializes every `cgc` write (initial index, reconcile tick,
+        # manual /reindex) — without this, a reconcile tick firing while
+        # the initial index is still running (a large workspace can take
+        # well over reconcile_interval_s) races a SECOND `cgc` write
+        # process against the first, independent of the visualizer-pause
+        # logic below (confirmed live 2026-08-10: last_reconcile failed
+        # with a truncated kuzudb error while the initial index was still
+        # in flight).
+        self._cgc_write_lock = asyncio.Lock()
 
         ctx.commands.install_system_cli(
             "cgc", "scripts/install_cgc.sh", uninstall="scripts/uninstall_cgc.sh"
@@ -152,19 +161,25 @@ class CodeGraphContextAppPlugin:
         DEFAULT_DATABASE didn't reliably fix it either — see module
         docstring). Stop it for the duration of a write, restart after —
         only if it was actually running before, so `auto_start: false`
-        stays honored."""
-        was_running = False
-        try:
-            was_running = bool(self.ctx.services.status(SERVICE_ID).get("running"))
-        except Exception:
-            log.exception("codegraphcontext: could not read visualizer status before pausing")
-        if was_running:
-            self.ctx.services.stop(SERVICE_ID)
-        try:
-            yield
-        finally:
+        stays honored.
+
+        Also serializes against every OTHER caller of this same method via
+        `_cgc_write_lock` — the visualizer isn't the only possible writer;
+        two `cgc` write processes (e.g. the initial index and a reconcile
+        tick) conflict with EACH OTHER too, not just with the visualizer."""
+        async with self._cgc_write_lock:
+            was_running = False
+            try:
+                was_running = bool(self.ctx.services.status(SERVICE_ID).get("running"))
+            except Exception:
+                log.exception("codegraphcontext: could not read visualizer status before pausing")
             if was_running:
-                self.ctx.services.start(SERVICE_ID)
+                self.ctx.services.stop(SERVICE_ID)
+            try:
+                yield
+            finally:
+                if was_running:
+                    self.ctx.services.start(SERVICE_ID)
 
     async def _run_initial_index(self, index_root: str) -> None:
         """One-shot, fire-and-forget. Only actually indexes if index_root
