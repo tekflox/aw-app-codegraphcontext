@@ -9,7 +9,7 @@
   "publisher": "TekFlox",
   "resource_estimate": {
     "cpu": "low",
-    "memory": "~150 MB idle; can spike into the GBs during the one-time initial index of a large workspace",
+    "memory": "~500 MB",
     "disk": "~500 MB"
   },
   "runtime": {
