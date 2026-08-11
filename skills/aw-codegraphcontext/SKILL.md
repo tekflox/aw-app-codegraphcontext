@@ -51,10 +51,18 @@ mechanism, not a single config file:
 
 1. **This app ships its own `mcp.json`** at the root of its package dir
    (`codegraphcontext_app/plugin.py`'s `write_mcp_json`, regenerated every
-   boot) — a single stdio server entry pointing at the `cgc` binary this
-   app installed (`AW_WORKSPACE_HOME/bin/cgc mcp start`). This is the exact
-   same pattern `aw-app-mcp-tools` uses for Playwright — **not** a manual
-   edit of any workspace-level `.mcp.json`.
+   boot) — a single stdio server entry pointing directly at the venv's own
+   `cgc` binary (`<package_dir>/.data/venv/bin/cgc mcp start`), not the
+   `AW_WORKSPACE_HOME/bin/cgc` PATH shim (that shim is what services/routes
+   running in the HOST process use — see "Why isolated" below; the gateway
+   is a *separate container* that only mounts `$AW_APPS_ROOT`, not
+   `AW_WORKSPACE_HOME`, so the shim is invisible to it). This works because
+   `aw-mcp-gateway` mounts `$AW_APPS_ROOT` at the exact same path it has on
+   the host (`/opt/aw-workspace/apps`, no more gateway-specific
+   `/workspace/apps` translation — fixed 2026-08-10, see
+   `tekflox/aw-mcp-gateway`) — `ctx.package_dir` is valid from both sides.
+   Same overall pattern `aw-app-mcp-tools` uses for Playwright — **not** a
+   manual edit of any workspace-level `.mcp.json`.
 2. **The `mcp-gateway` app scans every installed app's root `mcp.json`**
    and merges the servers it finds into the one MCP endpoint it serves.
    That's why this app declares `dependencies.apps: [{"id": "mcp-gateway"}]`
@@ -76,7 +84,10 @@ the commonly-used subset.
 ## Common actions
 
 * **Check indexing status**: `GET /api/apps/codegraphcontext/status` (or
-  the "Code Graph" window, which shows the same via its status widget).
+  the "Code Graph" window, which shows the same via its status widget) —
+  reports the visualizer's service status plus the last index/reconcile
+  result (in-memory, tracked by the plugin), not a live `cgc list` call
+  (see below for why).
 * **Force a full reindex**: `POST /api/apps/codegraphcontext/reindex`, or
   the "Force reindex" button in the window. Runs with the aggressive
   worker count, same as the initial index — use sparingly, this is a full
@@ -85,6 +96,21 @@ the commonly-used subset.
   terminal): `cgc find name <symbol>`, `cgc query "<cypher>"`.
 * **Change what gets indexed**: `index_root` in this app's settings
   (default `/opt/aw-workspace`, i.e. everything, dotfiles excluded).
+
+## Why the visualizer blips offline during indexing
+
+CodeGraphContext's default storage (KuzuDB) is a single-writer embedded
+file store — the `visualizer` service holds it open continuously, so any
+OTHER `cgc` invocation (index/update/list) started while it's running
+fails with a lock error ("Could not set lock on file"). Found live
+(2026-08-10): switching the backend to FalkorDB doesn't reliably avoid
+this either — `cgc update` still hit the kuzudb lock path even with
+FalkorDB configured, an apparent inconsistency in the upstream tool
+across commands. So `plugin.py`'s `_visualizer_paused()` stops the
+service for the duration of any index/update and restarts it after —
+only if it was actually running before, so `auto_start: false` stays
+honored. Expect the "Code Graph" window to briefly 503 during the initial
+index and every reconcile tick; this is normal, not a bug.
 
 ## Why isolated, not the shared workspace venv
 
