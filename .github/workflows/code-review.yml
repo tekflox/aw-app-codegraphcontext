@@ -12,7 +12,7 @@ name: Code Review
 # re-derived.
 #
 # ── WHY AN EXACT TAG, NOT @master ─────────────────────────────────────────
-# `@v1.5.0` is immutable and never retagged — enforced by a ruleset on the
+# `@v1.8.0` is immutable and never retagged — enforced by a ruleset on the
 # shared repo's `refs/tags/v*`. A moving ref here would mean an edit in that
 # repo changes this repo's merge gate with no commit on this repo — the same
 # shape as `app-release.yml`, referenced via a moving `@master` from ~45 app
